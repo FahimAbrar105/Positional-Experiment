@@ -12,5 +12,5 @@ INSTRUMENTS = {
     "Short Dark Triad (SD3)": SD3Instrument(),
     "Moral Foundations Questionnaire (MFQ-30)": MFQ30Instrument(),
     "Moral Foundations Vignettes (MFV)": MFVInstrument(),
-    "CHES 2024 (adapted, self-report)": CHES2024Instrument(),
+    "CHES 2024": CHES2024Instrument(),
 }

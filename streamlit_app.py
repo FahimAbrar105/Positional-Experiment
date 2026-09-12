@@ -4,6 +4,7 @@ import time
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
+from plotly.subplots import make_subplots
 import streamlit as st
 from dotenv import load_dotenv
 
@@ -16,6 +17,30 @@ load_dotenv()
 
 st.set_page_config(page_title="Position Bias Pilot", layout="wide")
 
+# Bigger UI text for presenting -- dropdowns, radio labels, buttons, and the
+# results table are all normal DOM elements Streamlit renders, so plain CSS
+# reaches them (unlike the plotly chart, which needs its own font settings
+# below since it draws its own text on a canvas).
+st.markdown(
+    """
+    <style>
+    div[data-testid="stSelectbox"] input { font-size: 20px !important; }
+    div[data-testid="stWidgetLabel"] p { font-size: 20px !important; }
+    div[data-testid="stRadioOption"] label, div[data-testid="stRadioOption"] p { font-size: 20px !important; }
+    div[data-testid="stButton"] button p { font-size: 20px !important; }
+    [role="option"] { font-size: 20px !important; }
+    div[data-testid="stTable"] table { font-size: 20px !important; }
+    div[data-testid="stTable"] th, div[data-testid="stTable"] td { font-size: 20px !important; padding: 0.5rem 0.75rem !important; }
+    div[data-testid="stAppDeployButton"] { display: none !important; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+CHART_FONT_SIZE = 18
+LEGEND_FONT_SIZE = 20
+TICK_FONT_SIZE = 16
+
 if "points" not in st.session_state:
     st.session_state.points = []          # accumulated trials for the current graph, across all instruments
 if "shuffle_counter" not in st.session_state:
@@ -24,10 +49,6 @@ if "is_running" not in st.session_state:
     st.session_state.is_running = False   # guards against a double-click firing two overlapping trials
 
 st.title("LLM Position Bias Pilot")
-st.caption(
-    "Pick a test, pick a model, run it in original order, then shuffle and run again. "
-    "Points accumulate on the graph below so you can see how far each model moves."
-)
 
 col_controls, col_graph = st.columns([1, 2], gap="large")
 
@@ -140,7 +161,7 @@ with col_graph:
                                   fillcolor=color, line_width=0, layer="below")
                     fig.add_annotation(x=lx, y=ly, text=label, showarrow=False,
                                        xanchor=xanchor, yanchor=yanchor,
-                                       font=dict(color="rgba(0,0,0,0.55)", size=12),
+                                       font=dict(color="rgba(0,0,0,0.55)", size=18),
                                        xshift=8 if xanchor == "left" else -8,
                                        yshift=-6 if yanchor == "top" else 6)
                 fig.update_layout(plot_bgcolor="white")
@@ -154,7 +175,7 @@ with col_graph:
                     showlegend=p["model"] not in [t.name for t in fig.data],
                     text=[p["condition_label"]],
                     textposition="top center",
-                    textfont=dict(color=color_by_model[p["model"]]),
+                    textfont=dict(color=color_by_model[p["model"]], size=TICK_FONT_SIZE),
                     marker=dict(size=15, symbol=shape_by_condition.get(p["condition_type"], "circle"),
                                 color=color_by_model[p["model"]],
                                 line=dict(width=1.5, color="rgba(0,0,0,0.6)")),
@@ -167,10 +188,65 @@ with col_graph:
                 xaxis_title=("Economic Left  ←  →  Economic Right" if is_compass else x_label),
                 yaxis_title=("Libertarian  ←  →  Authoritarian" if is_compass else y_label),
                 height=650, legend_title="Model",
+                font=dict(size=CHART_FONT_SIZE),
+                legend=dict(font=dict(size=LEGEND_FONT_SIZE)),
+                xaxis=dict(title_font=dict(size=CHART_FONT_SIZE), tickfont=dict(size=TICK_FONT_SIZE)),
+                yaxis=dict(title_font=dict(size=CHART_FONT_SIZE), tickfont=dict(size=TICK_FONT_SIZE)),
             )
             if is_compass:
                 fig.update_xaxes(range=[x_lo, x_hi], zeroline=False)
                 fig.update_yaxes(range=[y_lo, y_hi], zeroline=False)
+        elif instrument_name == "CHES 2024":
+            # CHES's 12 axes mix two different kinds of quantity -- "Position" axes
+            # (where do you stand on a policy) and "Salience/Clarity" axes (how much
+            # you care / how settled your view is). These are the same two kinds of
+            # quantity that used to be wrongly averaged together in the scoring (see
+            # ches2024.py) -- plotting them as spokes on one shared radar would
+            # reintroduce that same apples-to-oranges comparison visually, just one
+            # layer up. So each is its own radar instead.
+            def _ches_group(axis_name: str) -> str:
+                return "salience" if ("Salience/Clarity" in axis_name or axis_name == "European Integration") else "position"
+
+            position_axes = [a for a in axis_names if _ches_group(a) == "position"]
+            salience_axes = [a for a in axis_names if _ches_group(a) == "salience"]
+
+            fig = make_subplots(
+                rows=1, cols=2,
+                specs=[[{"type": "polar"}, {"type": "polar"}]],
+                subplot_titles=("Position (policy stances)", "Salience / Clarity"),
+            )
+            rng = points[0]["axis_ranges"][axis_names[0]]
+            for group_axes, col in [(position_axes, 1), (salience_axes, 2)]:
+                categories = group_axes + [group_axes[0]]
+                for p in points:
+                    r = [p["axes"][a] for a in group_axes] + [p["axes"][group_axes[0]]]
+                    fig.add_trace(
+                        go.Scatterpolar(
+                            r=r, theta=categories,
+                            mode="lines+markers",
+                            name=f"{p['model']} ({p['condition_label']})",
+                            legendgroup=p["model"],
+                            showlegend=(col == 1),
+                            line=dict(color=color_by_model[p["model"]], dash=dash_by_condition.get(p["condition_type"], "solid")),
+                            opacity=0.85,
+                            hovertemplate="%{theta}=%{r:.2f}<extra>" + f"{p['model']} ({p['condition_label']})" + "</extra>",
+                        ),
+                        row=1, col=col,
+                    )
+            fig.update_polars(
+                radialaxis=dict(range=list(rng), tickfont=dict(size=TICK_FONT_SIZE)),
+                angularaxis=dict(tickfont=dict(size=TICK_FONT_SIZE)),
+            )
+            fig.update_annotations(font_size=CHART_FONT_SIZE)  # the two subplot titles
+            fig.update_layout(
+                # taller than the single-radar charts below: CHES's block names are
+                # long ("Economic Left-Right (LRECON) -- Salience/Clarity"), and a
+                # bigger radius spaces same-size spoke labels further apart before
+                # they crowd each other, unlike the shorter axis names elsewhere.
+                height=850, legend_title="Model (condition)",
+                font=dict(size=CHART_FONT_SIZE),
+                legend=dict(font=dict(size=LEGEND_FONT_SIZE)),
+            )
         else:
             categories = axis_names + [axis_names[0]]
             for p in points:
@@ -186,9 +262,14 @@ with col_graph:
                 ))
             rng = points[0]["axis_ranges"][axis_names[0]]
             fig.update_layout(
-                polar=dict(radialaxis=dict(range=list(rng))),
+                polar=dict(
+                    radialaxis=dict(range=list(rng), tickfont=dict(size=TICK_FONT_SIZE)),
+                    angularaxis=dict(tickfont=dict(size=TICK_FONT_SIZE)),
+                ),
                 height=650,
                 legend_title="Model (condition)",
+                font=dict(size=CHART_FONT_SIZE),
+                legend=dict(font=dict(size=LEGEND_FONT_SIZE)),
             )
 
         st.plotly_chart(fig, use_container_width=True)
@@ -199,12 +280,4 @@ with col_graph:
                    "elapsed_seconds": p["elapsed_seconds"], "timestamp": p["timestamp"]}
             row.update({f"{k}": round(v, 2) for k, v in p["axes"].items()})
             table_rows.append(row)
-        st.dataframe(pd.DataFrame(table_rows), use_container_width=True)
-
-st.divider()
-st.caption(
-    "Every trial is also permanently logged to data/results/trials.csv, "
-    "data/results/item_responses.csv (item-level, for the SD / mixed-effects analysis), "
-    "and the model's exact raw reply under data/results/raw/ -- regardless of "
-    "'Reset graph', which only clears this view."
-)
+        st.table(pd.DataFrame(table_rows))
