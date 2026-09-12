@@ -4,7 +4,7 @@ from .bfi44 import BFI44Instrument
 from .sd3 import SD3Instrument
 from .mfq30 import MFQ30Instrument
 from .mfv import MFVInstrument
-from .ches2024 import CHES2024Instrument
+from .srpd import SRPDInstrument
 
 INSTRUMENTS = {
     "Political Compass Test": PoliticalCompassInstrument(),
@@ -12,5 +12,5 @@ INSTRUMENTS = {
     "Short Dark Triad (SD3)": SD3Instrument(),
     "Moral Foundations Questionnaire (MFQ-30)": MFQ30Instrument(),
     "Moral Foundations Vignettes (MFV)": MFVInstrument(),
-    "CHES 2024": CHES2024Instrument(),
+    "Self-Reported Political Dimensions (SRPD)": SRPDInstrument(),
 }

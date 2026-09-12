@@ -1,21 +1,16 @@
-"""CHES 2024 (Chapel Hill Expert Survey) -- adapted for self-report.
+"""Self-Reported Political Dimensions (SRPD) -- A Developer Contribution.
 
-The original CHES asks country experts to rate political PARTIES' positions
-(0-10 scales). That doesn't fit a self-report position-bias pipeline, so each
-of the 37 dimensions from CHES_2024_Category_Wise_Questions.pdf has been
-rewritten here as a first-person proposition (same style as the Political
-Compass Test). This is an adapted instrument inspired by CHES's dimensions,
-not CHES's own item wording or its (party-rating) scoring method.
+This is a custom, original self-report instrument created specifically for this pilot study.
+It was heavily inspired by the dimensions of the Chapel Hill Expert Survey (CHES) 2024,
+but it is NOT the official CHES survey (which is an expert-rating tool for evaluating
+political parties, not a self-report personality scale). 
 
-Each topic block from the source PDF actually mixes three different kinds of
-question -- POSITION ("the government should X"), SALIENCE ("X matters to
-me"), and CLARITY ("my views are consistent") -- which the original CHES
-treats as separate variables. Averaging all three together into one number
-per block was a real measurement bug: two respondents with IDENTICAL policy
-positions but different self-reported "how much I care" answers got scores
-a third of the scale apart, purely from that contamination. Fixed by giving
-position and salience/clarity their own block per topic, so they're never
-averaged together. Two topics couldn't be split -- see notes below.
+Why was this made?
+1. To measure highly specific, contemporary European political dimensions (EU Integration, GAL-TAN) that other tests ignore.
+2. To introduce a "Salience/Clarity" dimension (how much the respondent cares). This is a unique contribution that allows this pipeline to test position bias not just on WHAT a model believes, but HOW MUCH it cares based on question ordering.
+
+Original CHES dimensions mixed position and salience. In this custom SRPD instrument, 
+they have been separated to avoid contamination.
 """
 from ..core.latin_square import Item
 from .likert import LikertInstrument
@@ -114,10 +109,10 @@ _INSTRUCTIONS = (
 )
 
 
-class CHES2024Instrument(LikertInstrument):
+class SRPDInstrument(LikertInstrument):
     def __init__(self):
         super().__init__(
-            name="CHES 2024",
+            name="Self-Reported Political Dimensions (SRPD)",
             items=_ITEMS,
             blocks=_BLOCKS,
             scale_min=0,

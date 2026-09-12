@@ -196,28 +196,45 @@ with col_graph:
             if is_compass:
                 fig.update_xaxes(range=[x_lo, x_hi], zeroline=False)
                 fig.update_yaxes(range=[y_lo, y_hi], zeroline=False)
-        elif instrument_name == "CHES 2024":
-            # CHES's 12 axes mix two different kinds of quantity -- "Position" axes
+        elif instrument_name == "Self-Reported Political Dimensions (SRPD)":
+            # SRPD's 12 axes mix two different kinds of quantity -- "Position" axes
             # (where do you stand on a policy) and "Salience/Clarity" axes (how much
             # you care / how settled your view is). These are the same two kinds of
             # quantity that used to be wrongly averaged together in the scoring (see
-            # ches2024.py) -- plotting them as spokes on one shared radar would
+            # srpd.py) -- plotting them as spokes on one shared radar would
             # reintroduce that same apples-to-oranges comparison visually, just one
             # layer up. So each is its own radar instead.
-            def _ches_group(axis_name: str) -> str:
+            def _srpd_group(axis_name: str) -> str:
                 return "salience" if ("Salience/Clarity" in axis_name or axis_name == "European Integration") else "position"
 
-            position_axes = [a for a in axis_names if _ches_group(a) == "position"]
-            salience_axes = [a for a in axis_names if _ches_group(a) == "salience"]
+            position_axes = [a for a in axis_names if _srpd_group(a) == "position"]
+            salience_axes = [a for a in axis_names if _srpd_group(a) == "salience"]
 
             fig = make_subplots(
                 rows=1, cols=2,
                 specs=[[{"type": "polar"}, {"type": "polar"}]],
                 subplot_titles=("Position (policy stances)", "Salience / Clarity"),
+                horizontal_spacing=0.25,
             )
             rng = points[0]["axis_ranges"][axis_names[0]]
             for group_axes, col in [(position_axes, 1), (salience_axes, 2)]:
-                categories = group_axes + [group_axes[0]]
+                categories = []
+                for i, c in enumerate(group_axes):
+                    wrapped = c.replace(" -- ", "<br>")
+                    # Left chart's right-most label (0 degrees): pad bottom to push it UP significantly
+                    if col == 1 and i == 0:
+                        wrapped += "<br>&nbsp;<br>&nbsp;" 
+                    # Left chart's left-most label (180 degrees): wrap text to prevent left edge cutoff
+                    elif col == 1 and i == 3:
+                        wrapped = wrapped.replace(" Ideology (LRGEN)", "<br>Ideology (LRGEN)")
+                    # Right chart's right-most label (0 degrees): wrap text to prevent right edge cutoff
+                    elif col == 2 and i == 0:
+                        wrapped = wrapped.replace(" Integration", "<br>Integration")
+                    # Right chart's left-most label (180 degrees): pad top to push it DOWN significantly
+                    elif col == 2 and i == 3:
+                        wrapped = "&nbsp;<br>&nbsp;<br>" + wrapped
+                    categories.append(wrapped)
+                categories.append(categories[0])
                 for p in points:
                     r = [p["axes"][a] for a in group_axes] + [p["axes"][group_axes[0]]]
                     fig.add_trace(
@@ -236,16 +253,21 @@ with col_graph:
             fig.update_polars(
                 radialaxis=dict(range=list(rng), tickfont=dict(size=TICK_FONT_SIZE)),
                 angularaxis=dict(tickfont=dict(size=TICK_FONT_SIZE)),
+                bgcolor="rgba(0,0,0,0)",
             )
             fig.update_annotations(font_size=CHART_FONT_SIZE)  # the two subplot titles
             fig.update_layout(
-                # taller than the single-radar charts below: CHES's block names are
-                # long ("Economic Left-Right (LRECON) -- Salience/Clarity"), and a
-                # bigger radius spaces same-size spoke labels further apart before
-                # they crowd each other, unlike the shorter axis names elsewhere.
-                height=850, legend_title="Model (condition)",
+                height=700, legend_title="Model (condition)",
                 font=dict(size=CHART_FONT_SIZE),
-                legend=dict(font=dict(size=LEGEND_FONT_SIZE)),
+                legend=dict(
+                    font=dict(size=LEGEND_FONT_SIZE),
+                    orientation="h",
+                    yanchor="top",
+                    y=-0.2,
+                    xanchor="center",
+                    x=0.5
+                ),
+                margin=dict(l=140, r=140, t=80, b=100),
             )
         else:
             categories = axis_names + [axis_names[0]]
@@ -265,6 +287,7 @@ with col_graph:
                 polar=dict(
                     radialaxis=dict(range=list(rng), tickfont=dict(size=TICK_FONT_SIZE)),
                     angularaxis=dict(tickfont=dict(size=TICK_FONT_SIZE)),
+                    bgcolor="rgba(0,0,0,0)",
                 ),
                 height=650,
                 legend_title="Model (condition)",

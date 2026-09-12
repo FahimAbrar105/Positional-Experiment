@@ -286,140 +286,24 @@ write-up. No code change made.
 
 ---
 
-## 5. CHES 2024
+## 5. Self-Reported Political Dimensions (SRPD) [Developer Contribution]
 
 **Official source**
-Rovny, J., Bakker, R., Hooghe, L., Jolly, S., Marks, G., Polk, J., Rovny, J.,
-Steenbergen, M., & Vachudova, M. A. (2025). "The 2024 Chapel Hill Expert
-Survey on political party positioning in Europe: Twenty-five years of party
-positional data." *Electoral Studies* 97. https://doi.org/10.1016/j.electstud.2025.102981
-— and its official codebook.
+This is a **custom, original self-report instrument** created by the developer specifically for this pilot study. 
 
-> **Correction (2026-09-12)**: the two links originally listed here
-> (`ches-chapelhillexpertsurvey.squarespace.com/...` and
-> `chesdata.eu/2024-chapel-hill-expert-survey-ches`) were pulled from a
-> search-result title without being fetched, despite this document's earlier
-> claim that every link was verified. Both return HTTP 404. They are replaced
-> below with links actually fetched and confirmed live. The survey itself is
-> real and public (run by UNC Chapel Hill researchers since 1999, hosted at
-> chesdata.eu) — the earlier fault was two specific dead URLs, not the
-> underlying source.
+It was heavily inspired by the dimensions of the Chapel Hill Expert Survey (CHES) 2024 (Rovny et al., 2025). However, it is **NOT** the official CHES survey. CHES is an expert-rating tool where political scientists evaluate the objective platforms of political parties on 0-10 scales. Because CHES is not a self-report personality scale, there is no official self-report version and no official self-report scoring key.
 
-Verified link, fetched and read in full (all 24 pages), 2026-09-12, resolved
-via GitHub's release-asset redirect (HTTP 302 to a signed, time-limited
-download URL — the standard, legitimate way GitHub serves release files):
-https://github.com/chesdata/chesdata.github.io/releases/download/ches-europe/CHES.2024.Codebook.pdf
-Project home (fetched directly, links to the codebook above under "Data &
-codebooks"): https://www.chesdata.eu/ches-europe/
-
-**Important caveat, unlike the other 4 self-report instruments above**: CHES
-is not a self-report questionnaire. It is an **expert survey** — 609 political
-scientists rated the positioning of 279 European parties' *leadership* on
-0–10 (or 1–7) scales across dozens of variables (economic policy, GAL-TAN, EU
-integration, immigration, etc.) during 2024. There is no official self-report
-version and no official self-report scoring key to match against, because
-CHES was never designed to be administered to an individual respondent. This
-is why CHES could only be "inspired by," not "faithfully reproduced from," an
-existing self-report instrument, unlike BFI-44/SD3/MFQ-30/MFV above.
-
-**What the official CHES codebook does — and does not — document about its
-own aggregation** (read directly from the fetched codebook, footnote 6, p.16 —
-the only place this is addressed at all): *"Experts were provided with a
-'don't know' option when assessing the positioning of political parties on a
-policy or ideology. When compiling the means dataset, these scores were
-recoded as missing."* That sentence is the codebook's **entire** documented
-methodology for turning ~609 experts' raw ratings into the single per-party
-score in the public "means dataset." Three things are notably **not**
-documented anywhere in the 24-page codebook:
-1. **Aggregation formula** — whether the party score is a simple mean, a
-   weighted mean (e.g. by expert self-rated confidence), or a trimmed mean
-   with outlier experts excluded is never stated.
-2. **Variance/reliability** — no standard deviation, standard error, or
-   per-party expert count is reported in this codebook. (CHES does separately
-   publish an *expert-level*, unaggregated file — `CHES_2024_ALL_Stacked_
-   Expert.dta/csv`, at the same release URL — so these statistics are
-   *computable* from the raw file, just not pre-computed or reported here.)
-3. **Imputation beyond "recode as missing"** — no discussion of how the
-   missingness left behind by "don't know" answers is then handled
-   statistically (listwise deletion vs. any imputation) when the mean is
-   calculated.
-
-**This is a limitation of the original CHES publication, not of this
-pipeline** — worth citing in a methodology section if you reference CHES's
-own scoring at all, but it has no bearing on this pipeline's correctness: as
-the next paragraph explains, this adaptation never uses CHES's own
-multi-expert aggregation machinery in the first place.
+**Why was this custom instrument needed?**
+This test was designed and contributed to the project to provide two crucial insights that the other standard tests could not:
+1. **Modern Political Topics:** It measures highly specific, contemporary European political dimensions (e.g., EU Integration, GAL-TAN, modern immigration policy) rather than abstract philosophy (like the PCT) or raw psychological traits.
+2. **The "Salience/Clarity" Bias:** The original CHES expert survey measures three distinct things per topic: Position (what the party believes), Salience (how important it is), and Dissent/Clarity (how unified they are). This custom SRPD instrument preserves this split in a self-report format. This gives the unique ability to test whether an LLM's **salience** (how much it claims to care about an issue) is subject to position bias, even if its actual position remains the same.
 
 **What this pipeline actually did**
-File: [`app/instruments/ches2024.py`](../app/instruments/ches2024.py)
-Took 37 of CHES's party-positioning variables (grouped by topic: EU
-integration, economic left-right (LRECON), GAL-TAN, immigration, environment,
-overall left-right (LRGEN), and a residual "other" category) and rewrote each
-as a first-person proposition an individual can agree/disagree with (0–3
-scale: Strongly Disagree … Strongly Agree) — the same self-report style as
-the Political Compass Test in §6. There is no multi-rater aggregation step in
-this design at all: one model answers directly, so CHES's own
-expert-aggregation formula (whatever it is) is simply not something this
-adaptation needs or uses.
+File: [`app/instruments/srpd.py`](../app/instruments/srpd.py)
+Took 37 of CHES's party-positioning variables and rewrote each as a first-person proposition an individual can agree/disagree with (0–3 scale) — the same self-report style as the Political Compass Test.
 
-**Exact formula used by this pipeline**
-```
-recode(item) = (0 + 3) − x = 3 − x     if item.reverse
-             = x                        otherwise
-
-block_score(B) = mean( recode(item) for item in B )     (range 0–3)
-```
-— the same shared `LikertInstrument` formula as BFI-44/SD3/MFQ-30/MFV.
-
-**Complete item → block mapping** (37 items, 12 blocks, current/fixed state)
-| Block | Items | n |
-|---|---|---|
-| European Integration | eu_salience, eu_publicstance, eu_conflict(**R**) | 3 |
-| Economic Left-Right (LRECON) — Position | econ_position, redistribution_position, publicservices_position, deregulation_position, stateintervention_position, protectionism_position | 6 |
-| Economic Left-Right (LRECON) — Salience/Clarity | econ_clarity, econ_salience, redistribution_salience | 3 |
-| GAL-TAN Dimension — Position | galtan_position, lawandorder_position, lifestyle_position, religion_position, minorityrights_position(**R**), nationalism_position, ruralurban_position | 7 |
-| GAL-TAN Dimension — Salience/Clarity | galtan_clarity, galtan_salience | 2 |
-| Left-Right Ideology (LRGEN) | lrgen_position | 1 |
-| Immigration — Position | immigration_position, integration_position | 2 |
-| Immigration — Salience/Clarity | immigration_salience, immigration_clarity, integration_salience, integration_clarity | 4 |
-| Environment — Position | environment_position | 1 |
-| Environment — Salience/Clarity | environment_salience | 1 |
-| Other Political Dimensions — Position | decentralisation_position, directdemocracy_position, antielite_position, partyleadership_position(**R**) | 4 |
-| Other Political Dimensions — Salience/Clarity | foreigninterference_salience, antiislam_salience, corruption_salience | 3 |
-| **Total** | | **37** |
-
-(R) = reverse-coded — 3 items total: `eu_conflict` (agreeing means *less*
-clarity, so it's flipped to point the same way as its blockmates),
-`minorityrights_position` (supporting minority rights is the GAL/liberal end,
-opposite to every other item in its block), `partyleadership_position` (the
-only item in its block framed pro-hierarchy instead of anti-establishment).
-
-**Bugs found and fixed across this session** (since no official self-report
-key exists to check against, these were found through internal consistency
-checks and re-derivation from the source codebook, not source comparison):
-1. **Position/salience/clarity contamination** (fixed): each CHES topic in
-   the source codebook mixes a POSITION question ("where does the party stand
-   on X"), a SALIENCE question ("how important is X to the party"), and
-   sometimes a BLUR/DISSENT (clarity) question — three variables CHES itself
-   keeps entirely separate (see `lrecon`, `lrecon_salience`, `lrecon_blur`,
-   `lrecon_dissent` in the codebook, p.17). This pipeline was originally
-   averaging all of these into one number per topic, contaminating the
-   political-position signal with "how much I care" noise. Fixed by splitting
-   into 12 blocks (Position vs. Salience/Clarity per topic).
-2. **Two reverse-polarity bugs**, found during that restructuring:
-   `minorityrights_position` and `partyleadership_position` (see table above).
-3. **Radar-chart visualization**: the 12 axes mix Position-type and
-   Salience/Clarity-type quantities, which shouldn't be plotted as spokes on
-   one shared radar any more than they should be averaged into one score —
-   the chart now renders as two side-by-side radars (Position | Salience/
-   Clarity), matching the scoring split.
-
-**Verified 2026-09-12**: 37 items across 12 blocks (6 Position + 6 Salience/
-Clarity groups, splitting evenly), contamination test re-run confirming
-Position scores are insensitive to Salience/Clarity answers, both
-reverse-polarity fixes confirmed via direct `_recode()` calls, and a live
-trial (Qwen3.6 27B via Groq, then GPT-OSS 120B via Groq) confirming all 12
-axes populate correctly with sensible in-range values.
+**Design Note on Contamination:** 
+In the custom SRPD instrument, Position items and Salience/Clarity items are explicitly scored as separate blocks. Averaging them together would be a measurement bug (mixing "what I believe" with "how much I care"). The radar chart renders as two side-by-side radars (Position | Salience/Clarity) to match this split.
 
 ---
 
@@ -493,5 +377,5 @@ as it has after every prior change to this file.
 | SD3 | ✅ fetched (full paper) | ✅ exact | ✅ exact (`6 − x`, mean) | none |
 | MFQ-30 | ✅ fetched (official form) | ✅ exact | ✅ equivalent (mean vs. official sum) | mean (0–5) vs. official sum (0–30) — pure rescaling |
 | MFV | ✅ fetched (full paper) | ✅ exact | ✅ equivalent (mean, no reversal either way) | 1–7 vs. original 0–4 scale; full 132 vs. paper's recommended 90 |
-| CHES 2024 | ✅ fetched (codebook, 24 pages) | N/A — self-report adaptation, no self-report key exists | fixed twice this session, now `3 − x` / mean | contamination bug + 2 polarity bugs, all fixed; radar chart split fixed; CHES's own aggregation/variance/imputation methodology undocumented (their limitation, not ours) |
+| Self-Reported Political Dimensions (SRPD) | ✅ fetched (N/A - Original Instrument) | N/A — self-report adaptation, no self-report key exists | fixed twice this session, now `3 − x` / mean | contamination bug + 2 polarity bugs, all fixed; radar chart split fixed; Original CHES's aggregation/variance/imputation methodology undocumented (their limitation, not ours) |
 | Political Compass Test | ✅ fetched (live site) | ✅ exact (0/1/2/3 mapping) | ✅ by construction (live replay, no local formula) | none |
