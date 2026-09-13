@@ -27,5 +27,4 @@ venv.bak/
 Thumbs.db
 
 # Project specific exclusions
-CLAUDE/
 data/results/

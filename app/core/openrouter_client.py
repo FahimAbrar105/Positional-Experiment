@@ -10,12 +10,11 @@ _MALFORMED_RETRY_DELAYS = [3, 8]        # some free providers occasionally retur
 _SITE_URL = "https://github.com/"
 _APP_NAME = "thesis-position-bias-pilot"
 
-# Some free models (observed: NVIDIA's Nemotron family) will happily burn their
-# ENTIRE completion budget on internal reasoning and return empty content, even
-# with a qualitative {"effort": "low"} hint -- one measured case spent 618
-# reasoning tokens just to say "Hello". A hard token cap on reasoning, rather
-# than a qualitative hint, is what actually guarantees budget survives for the
-# real answer; verified against a full 62-item prompt before adopting this.
+# Some free models (NVIDIA's Nemotron family in particular) will happily burn
+# their entire completion budget on internal reasoning and return empty
+# content, even with a qualitative {"effort": "low"} hint. A hard token cap on
+# reasoning, rather than a qualitative hint, is what actually guarantees
+# budget survives for the real answer.
 _REASONING_TOKEN_CAP = 4000
 
 

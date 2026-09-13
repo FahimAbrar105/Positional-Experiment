@@ -137,10 +137,9 @@ with col_controls:
 
     # The is_running guard (not just the button's disabled= state) is what actually
     # stops a double-click: a trial can take tens of seconds, and a second click
-    # registered before the button visually greys out would otherwise fire a second,
-    # overlapping call to the same model -- which is exactly what tripped a 429 on a
-    # rate-limited free model in testing (two near-simultaneous requests where one
-    # alone would have been fine).
+    # registered before the button visually greys out would otherwise fire a
+    # second, overlapping call to the same model -- which can trip rate limits
+    # on free-tier models even when a single request would have succeeded.
     if run_clicked and not st.session_state.is_running and not saved_mode:
         st.session_state.is_running = True
         rng = random.Random()
@@ -283,11 +282,11 @@ with col_graph:
         elif instrument_name == "Self-Reported Political Dimensions (SRPD)":
             # SRPD's 12 axes mix two different kinds of quantity -- "Position" axes
             # (where do you stand on a policy) and "Salience/Clarity" axes (how much
-            # you care / how settled your view is). These are the same two kinds of
-            # quantity that used to be wrongly averaged together in the scoring (see
-            # srpd.py) -- plotting them as spokes on one shared radar would
-            # reintroduce that same apples-to-oranges comparison visually, just one
-            # layer up. So each is its own radar instead.
+            # you care / how settled your view is). These are scored as separate
+            # blocks precisely so they aren't conflated (see srpd.py); plotting them
+            # as spokes on one shared radar would reintroduce that same
+            # apples-to-oranges comparison visually, just one layer up. So each is
+            # its own radar instead.
             def _srpd_group(axis_name: str) -> str:
                 return "salience" if ("Salience/Clarity" in axis_name or axis_name == "European Integration") else "position"
 
@@ -297,10 +296,9 @@ with col_graph:
             # Stacked (one above the other), not side-by-side: two polar charts
             # sharing one row have to split the container's width between them,
             # and with 6 verbose axis names each ("Economic Left-Right (LRECON)
-            # -- Salience/Clarity"), that leaves too little room at anything but
-            # a wide viewport -- confirmed by testing at the app's normal
-            # (narrower) width, where side-by-side produced overlapping labels.
-            # Stacked, each radar gets the FULL container width to itself.
+            # -- Salience/Clarity"), that leaves too little room for the labels
+            # to stay legible at the app's normal width. Stacked, each radar
+            # gets the full container width to itself.
             fig = make_subplots(
                 rows=2, cols=1,
                 specs=[[{"type": "polar"}], [{"type": "polar"}]],
@@ -309,9 +307,8 @@ with col_graph:
             )
             rng = points[0]["axis_ranges"][axis_names[0]]
             for group_axes, row in [(position_axes, 1), (salience_axes, 2)]:
-                # generic wrapping (split each label at its own " -- ") rather
-                # than the previous per-index special-casing, which only held up
-                # at the specific viewport width it was tuned against.
+                # split each label at its own " -- " so long axis names wrap
+                # onto two lines instead of overflowing.
                 categories = [c.replace(" -- ", "<br>") for c in group_axes]
                 categories.append(categories[0])
                 for p in points:

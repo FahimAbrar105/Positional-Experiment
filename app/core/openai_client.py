@@ -1,10 +1,9 @@
 """Thin client for querying OpenAI's own API directly.
 
-Verified against this account: gpt-4.1-nano and gpt-4o-mini both return
-`credit_balance_exhausted` (no paid credits on this account), but gpt-5.6-luna
-works anyway -- it appears to sit on some free/promotional allowance rather
-than the account's paid balance, though OpenAI exposes no way to confirm that
-distinction via API key (billing endpoints require browser session auth).
+gpt-4.1-nano and gpt-4o-mini require paid credits, but gpt-5.6-luna is
+available on some free/promotional allowance rather than the account's paid
+balance, though OpenAI exposes no way to confirm that distinction via API key
+(billing endpoints require browser session auth).
 
 Important methodological caveat: gpt-5.6-luna rejects temperature=0 outright
 ("only the default (1) value is supported") -- unlike every other model in

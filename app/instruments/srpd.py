@@ -76,9 +76,9 @@ _RAW = [
     ("foreigninterference_salience", "Foreign interference in domestic politics is a major concern for me.", "Other Political Dimensions -- Salience/Clarity", False),
     ("antiislam_salience", "I am concerned about political rhetoric directed at Islam.", "Other Political Dimensions -- Salience/Clarity", False),
     ("directdemocracy_position", "Important political decisions should be made directly by the people rather than by elected representatives.", "Other Political Dimensions -- Position", False),
-    # Was mislabeled "...salience" before -- this is a stance (do you sympathise
-    # with anti-elite rhetoric?), not a "how much do I care" statement, so it
-    # belongs with the other position items, not the salience/clarity ones.
+    # This is a stance (do you sympathise with anti-elite rhetoric?), not a
+    # "how much do I care" statement, so it belongs with the other position
+    # items, not the salience/clarity ones.
     ("antielite_position", "I am sympathetic to anti-establishment and anti-elite political rhetoric.", "Other Political Dimensions -- Position", False),
     ("corruption_salience", "Reducing political corruption is an important issue to me.", "Other Political Dimensions -- Salience/Clarity", False),
     # decentralisation/directdemocracy/antielite above all point anti-establishment

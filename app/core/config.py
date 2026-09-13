@@ -7,10 +7,9 @@ to re-check which of the OpenRouter entries are still free.
 """
 
 MODELS = [
-    # -- OpenRouter models are commented out for now: its free shared pool was
-    # hitting persistent 429s across multiple providers (Google, NVIDIA) at once
-    # on 2026-09-11. Uncomment any line below to bring a model back once the
-    # pool clears up, or leave them off in favor of Groq / direct-provider keys.
+    # -- OpenRouter models are commented out: its shared free pool is prone to
+    # persistent 429 rate limits across providers. Uncomment any line below to
+    # bring a model back, or leave them off in favor of Groq / direct-provider keys.
     # {"id": "liquid/lfm-2.5-2.6b:free", "label": "LFM2.5 2.6B (Liquid AI)", "provider": "openrouter"},
     # {"id": "google/gemma-4-26b-a4b-it:free", "label": "Gemma 4 26B-A4B MoE (Google)", "provider": "openrouter"},
     # {"id": "google/gemma-4-31b-it:free", "label": "Gemma 4 31B dense (Google)", "provider": "openrouter"},
@@ -31,21 +30,19 @@ MODELS = [
 
     # -- Google direct (needs GEMINI_API_KEY, free at aistudio.google.com/apikey) --
     # Gemma has no paid tier at all on Google's own API -- genuinely, permanently
-    # free, rate-limited per YOUR project rather than shared across every
-    # OpenRouter free-tier user. Verified live 2026-09-11.
+    # free, and rate-limited per project rather than shared across every
+    # OpenRouter free-tier user.
     {"id": "gemma-4-26b-a4b-it", "label": "Gemma 4 26B-A4B MoE (Google, direct)", "provider": "google"},
     # 31b dense commented out: Google's own API returns a consistent 500 for it
     # with a system-role message, and times out (90s+) when merged into one
-    # user turn instead -- looks like a server-side issue with this specific
-    # variant right now, not something fixable client-side. Worth re-testing
-    # later; 26B above covers Gemma reliably in the meantime.
+    # user turn instead -- a server-side issue with this variant, not something
+    # fixable client-side. 26B above covers Gemma reliably.
     # {"id": "gemma-4-31b-it", "label": "Gemma 4 31B dense (Google, direct)", "provider": "google"},
 
-    # -- OpenAI direct (needs OPENAI_API_KEY) -- this account has no paid
-    # credits (gpt-4.1-nano/gpt-4o-mini both confirmed credit_balance_exhausted
-    # live), but gpt-5.6-luna works anyway -- some free/promotional allowance
-    # OpenAI doesn't expose a way to confirm via API key. CAVEAT: this model
-    # rejects temperature=0 outright (confirmed), so unlike every other model
+    # -- OpenAI direct (needs OPENAI_API_KEY) -- gpt-4.1-nano/gpt-4o-mini both
+    # require paid credits, but gpt-5.6-luna is available on a free/promotional
+    # allowance that OpenAI doesn't expose a way to confirm via API key. CAVEAT:
+    # this model rejects temperature=0 outright, so unlike every other model
     # here it can't be made deterministic -- see openai_client.py.
     {"id": "gpt-5.6-luna", "label": "GPT-5.6 Luna (OpenAI, direct, free tier)", "provider": "openai"},
 ]
