@@ -25,6 +25,3 @@ venv.bak/
 # OS generated files
 .DS_Store
 Thumbs.db
-
-# Project specific exclusions
-data/results/
