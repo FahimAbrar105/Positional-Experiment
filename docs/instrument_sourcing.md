@@ -1,43 +1,35 @@
-# Instrument Sourcing & Verification Record
+# Instrument Sourcing & Methodology Record
 
-This document is the full methodological record for all 6 test instruments in
-this pipeline: the **official source** each was derived from, the **exact
-formula** the source specifies, the **complete item-to-block mapping** used,
-and **exactly how this pipeline processes it end-to-end** — from prompt
-construction through parsing to final score. Every external link below was
-fetched and read directly during the audit sessions on 2026-09-12 (not taken
-on faith from a search snippet) unless explicitly noted otherwise.
+This is my methodology reference for all 6 tests in the pipeline: where each
+instrument's scoring comes from, the exact formula it uses, the complete
+item-to-block mapping, and how I process it end-to-end in code — from prompt
+construction through parsing to the final score.
 
 ---
 
-## 0. How the pipeline processes *any* instrument (shared machinery)
+## 0. How I process any instrument (shared machinery)
 
 Every instrument goes through the same five-step pipeline
-([`app/core/engine.py`](../app/core/engine.py)), regardless of which of the 6
-tests it is:
+(`app/core/engine.py`), regardless of which of the 6 tests it is:
 
-1. **Item ordering** ([`app/core/latin_square.py`](../app/core/latin_square.py)):
-   `baseline_order()` (published order, unchanged), `full_shuffle()` (every
-   item independently randomized via `random.Random.shuffle`), or
-   `full_reversal()` (`list(reversed(items))`) — this is the manipulated
-   variable the whole thesis is testing for.
-2. **Prompt construction**: `instrument.build_system_prompt()` states the
-   scale/anchors and the required reply format; `instrument.build_user_prompt()`
-   numbers the items 1..N in the displayed order. The model only ever sees
-   sequential 1..N numbering — it never sees the item's real `item_id`, so it
-   cannot infer anything from item naming.
-3. **Query + repair loop**: the model is queried once
-   (`llm_client.query_model`); if any position 1..N got no valid answer, up to
-   2 follow-up "you missed item(s) N" repair turns are sent before giving up.
-4. **Parsing**: `instrument.parse_response()` turns raw model text into
-   `{item_id: numeric_value}` via a regex extractor (exact pattern given per
-   instrument below), validated against that instrument's scale range so a
-   stray number inside ordinary item text can't be mistaken for an answer.
-5. **Scoring**: `instrument.score()` turns `{item_id: value}` into
-   `ScoreResult(axes={block_name: score}, axis_ranges={...})`. For the 5
-   Likert-style instruments (BFI-44, SD3, MFQ-30, MFV, CHES) this is the
-   shared `LikertInstrument.score()` in
-   [`app/instruments/likert.py`](../app/instruments/likert.py):
+1. **Item ordering** (`app/core/latin_square.py`): `baseline_order()`
+   (published order, unchanged), `full_shuffle()` (every item independently
+   randomized across the entire instrument, ignoring block boundaries), or
+   `full_reversal()` (the whole list reversed). This is the manipulated
+   variable my thesis is testing for.
+2. **Prompt construction**: the system prompt states the scale/anchors and
+   required reply format; the user prompt numbers the items 1..N in whatever
+   order they were displayed. The model only ever sees sequential numbering —
+   never the item's internal ID — so it can't infer anything from item naming.
+3. **Query + repair loop**: I query the model once; if any position 1..N got
+   no valid answer, I send up to 2 follow-up "you missed item(s) N" repair
+   turns before giving up.
+4. **Parsing**: raw model text becomes `{item_id: numeric_value}` via a regex
+   extractor, validated against that instrument's scale range so a stray
+   number inside ordinary item text can't be mistaken for an answer.
+5. **Scoring**: `{item_id: value}` becomes `{block_name: score}`. For the 5
+   Likert-style instruments (BFI-44, SD3, MFQ-30, MFV, SRPD) I use one shared
+   formula (`app/instruments/likert.py`):
 
    ```
    recode(item, value) = (scale_min + scale_max) − value   if item.reverse
@@ -46,11 +38,11 @@ tests it is:
    block_score(B) = mean( recode(item, responses[item]) for item in B )
    ```
 
-   Political Compass Test is the one exception — see §6 — it does not use
-   this formula at all; it replays the answers through the live site instead
-   of computing a formula locally.
+   The Political Compass Test is the one exception (§6) — it doesn't use this
+   formula at all; it replays my answers through the live site instead of
+   computing anything locally.
 
-Parsing regex shared by all 5 Likert instruments (`likert.py`):
+Parsing regex shared by all 5 Likert instruments:
 ```
 (?:^|\s)(\d+)\s*[.:)]\s*(-?\d+)
 ```
@@ -63,14 +55,13 @@ run together on one line), and only accepts `value` if
 
 ## 1. Big Five Inventory (BFI-44)
 
-**Official source**
-John, O. P., & Srivastava, S. (1999). *The Big Five Trait Taxonomy: History,
-Measurement, and Theoretical Perspectives.* Scoring key as maintained by the
-Personality Processes Lab (Wisconsin/Berkeley), attributed to John, Naumann, &
-Soto (2008).
-Verified link (fetched 2026-09-12): https://arc.psych.wisc.edu/self-report/big-five-inventory-bfi/
+**Source**: John, O. P., & Srivastava, S. (1999). *The Big Five Trait
+Taxonomy: History, Measurement, and Theoretical Perspectives.* Scoring key
+maintained by the Personality Processes Lab (Wisconsin/Berkeley), attributed
+to John, Naumann, & Soto (2008).
+Link: https://arc.psych.wisc.edu/self-report/big-five-inventory-bfi/
 
-**Exact official formula**
+**Formula**
 ```
 recode(item) = 6 − x         if item is reverse-keyed (marked "R")
              = x              otherwise
@@ -78,7 +69,7 @@ recode(item) = 6 − x         if item is reverse-keyed (marked "R")
 trait_score(T) = mean( recode(item) for item in T )        (range 1–5)
 ```
 
-**Complete item → trait mapping** (44 items; "R" = reverse-keyed)
+**Item → trait mapping** (44 items; "R" = reverse-keyed)
 | Trait | Items (R = reverse-keyed) | n |
 |---|---|---|
 | Extraversion | 1, 6R, 11, 16, 21R, 26, 31R, 36 | 8 |
@@ -91,36 +82,21 @@ Scale: 1 = Disagree strongly, 2 = Disagree a little, 3 = Neither agree nor
 disagree, 4 = Agree a little, 5 = Agree strongly. Every item completes the
 stem *"I see myself as someone who \_\_\_."*
 
-**How this pipeline processes it end-to-end**
-File: [`app/instruments/bfi44.py`](../app/instruments/bfi44.py)
-- Item text/phrase, item number, block, and reverse-flag are hard-coded in
-  `_RAW` exactly as the table above, then wrapped into `Item(item_id="bfi{n}",
-  text=f"I see myself as someone who {phrase}.", block=trait, reverse=rev)`.
-- Prompt: `LikertInstrument.build_system_prompt()` lists the 1–5 scale with the
-  4 anchor labels above and instructs `"<number>: <integer>"` replies only.
-- Parsing: the shared regex above, restricted to `1 <= value <= 5`.
-- Scoring: `recode(item,value) = (1+5) − value = 6 − value` if reverse, else
-  `value` — this is `LikertInstrument._recode()`, algebraically identical to
-  the official `6 − x` formula. Then `block_score = mean(recoded values)` per
-  trait, exactly `LikertInstrument.score()`.
-- Output: 5 axes (one per trait), each range (1.0, 5.0).
-
-**Verified 2026-09-12**: all 15 reverse-keyed items match the official key
-exactly, trait groupings match, stem wording matches, and the recode formula
-is algebraically identical to the official `6 − x`. No changes made — no
-discrepancy found.
+**Implementation**: `app/instruments/bfi44.py`. Item phrase, block, and
+reverse-flag match the table above exactly. Scoring is the shared
+`LikertInstrument._recode()`/`score()` — `6 − value` if reverse, then mean per
+trait. 5 output axes, each ranging (1.0, 5.0).
 
 ---
 
 ## 2. Short Dark Triad (SD3)
 
-**Official source**
-Jones, D. N., & Paulhus, D. L. (2014). *Introducing the Short Dark Triad
-(SD3): A Brief Measure of Dark Personality Traits.* Assessment, 21(1), 28–41.
-Verified link (fetched and read in full, incl. Appendix, 2026-09-12):
-https://www2.psych.ubc.ca/~dpaulhus/research/DARK_TRAITS/ARTICLES/ASSESST.2014.with.Jones.pdf
+**Source**: Jones, D. N., & Paulhus, D. L. (2014). *Introducing the Short
+Dark Triad (SD3): A Brief Measure of Dark Personality Traits.* Assessment,
+21(1), 28–41.
+Link: https://www2.psych.ubc.ca/~dpaulhus/research/DARK_TRAITS/ARTICLES/ASSESST.2014.with.Jones.pdf
 
-**Exact official formula**
+**Formula**
 ```
 recode(item) = 6 − x         if item is reverse-scored ("R" in the Appendix)
              = x              otherwise
@@ -130,56 +106,42 @@ subscale_score(S) = mean( recode(item) for item in S )      (range 1–5)
 ("After recoding the reversals..., each subscale was formed by averaging the
 items" — Study 3, Measures section, verbatim.)
 
-**Complete item → subscale mapping** (27 items; R = reverse-scored)
+**Item → subscale mapping** (27 items; R = reverse-scored)
 | Subscale | Items (1–9, R = reverse) | n |
 |---|---|---|
 | Machiavellianism | 1–9, none reversed | 9 |
 | Narcissism | 1, 2R, 3, 4, 5, 6R, 7, 8R, 9 | 9 |
 | Psychopathy | 1, 2R, 3, 4, 5, 6, 7R, 8, 9 | 9 |
 
-Reverse items verbatim: Narcissism #2 "I hate being the center of attention",
-#6 "I feel embarrassed if someone compliments me", #8 "I am an average
-person"; Psychopathy #2 "I avoid dangerous situations", #7 "I have never
-gotten into trouble with the law". 5 reversed items total.
+Reverse items: Narcissism #2 "I hate being the center of attention", #6 "I
+feel embarrassed if someone compliments me", #8 "I am an average person";
+Psychopathy #2 "I avoid dangerous situations", #7 "I have never gotten into
+trouble with the law". Scale: 1 = Disagree strongly … 5 = Agree strongly.
 
-Scale: 1 = Disagree strongly … 5 = Agree strongly.
-
-**How this pipeline processes it end-to-end**
-File: [`app/instruments/sd3.py`](../app/instruments/sd3.py)
-- All 27 items transcribed verbatim from the paper's Appendix, in the same
-  order, with `item_id=f"sd3_{block[:4].lower()}{n}"` and `reverse` flags
-  exactly matching the table above.
-- Prompt/parsing/recode/scoring: identical `LikertInstrument` machinery as
-  BFI-44 — `recode = 6 − value` if reverse, `block_score = mean(recoded)`.
-- Output: 3 axes (Machiavellianism, Narcissism, Psychopathy), each (1.0, 5.0).
-
-**Verified 2026-09-12**: item wording and order match the Appendix verbatim,
-word-for-word, item-by-item. All 5 reverse items match exactly. No changes
-made — no discrepancy found.
+**Implementation**: `app/instruments/sd3.py`. All 27 items transcribed
+verbatim from the paper's Appendix, same order, same reverse flags. 3 output
+axes (Machiavellianism, Narcissism, Psychopathy), each (1.0, 5.0).
 
 ---
 
 ## 3. Moral Foundations Questionnaire (MFQ-30)
 
-**Official source**
-Graham, J., Haidt, J., & Nosek, B. A. (2008). *Moral Foundations
+**Source**: Graham, J., Haidt, J., & Nosek, B. A. (2008). *Moral Foundations
 Questionnaire (MFQ-30), self-scorable form.*
-Verified link (fetched and read in full, incl. scoring grid, 2026-09-12):
-https://static1.squarespace.com/static/5b766d0870e802b05f3c7fa5/t/60133ec90af93f03c11bedd9/1611873993830/fullMFQ.pdf
-See also: https://moralfoundations.org/questionnaires/ and the validation
-paper, Graham, J., Nosek, B. A., Haidt, J., Iyer, R., Koleva, S., & Ditto,
-P. H. (2011). *Mapping the Moral Domain.* J. Personality and Social
-Psychology, 101(2), 366–385.
+Link: https://static1.squarespace.com/static/5b766d0870e802b05f3c7fa5/t/60133ec90af93f03c11bedd9/1611873993830/fullMFQ.pdf
+Also: https://moralfoundations.org/questionnaires/ and Graham, J., Nosek,
+B. A., Haidt, J., Iyer, R., Koleva, S., & Ditto, P. H. (2011). *Mapping the
+Moral Domain.* J. Personality and Social Psychology, 101(2), 366–385.
 
-**Exact official formula**
+**Formula**
 ```
 foundation_score(F) = SUM( responses[item] for item in F )      (range 0–30)
 ```
-No reverse-coding anywhere in MFQ-30 — every item already points the same
-direction within its foundation. Items 6 and 22 are attention-check foils,
-never scored.
+No reverse-coding anywhere — every item already points the same direction
+within its foundation. Items 6 and 22 are attention-check foils and are never
+scored (or shown).
 
-**Complete item → foundation mapping** (32 numbered items, 30 scored)
+**Item → foundation mapping** (32 numbered items, 30 scored)
 | Foundation | Relevance items (0–5 "how relevant") | Judgment items (0–5 agree/disagree) |
 |---|---|---|
 | Harm/Care | 1, 7, 12 | 17, 23, 28 |
@@ -189,61 +151,41 @@ never scored.
 | Purity/Sanctity | 5, 11, 16 | 21, 27, 32 |
 | *(foils, unscored)* | 6 ("good at math") | 22 ("better to do good than bad") |
 
-Combining 3 relevance + 3 judgment items per foundation is the **intended,
-validated design** (confirmed directly from the official scoring form) — not
-a measurement error, unlike the CHES contamination bug in §5 below.
-Published population reference (0–30 sum scale, politically-moderate
-Americans): Harm 20.2, Fairness 20.5, Loyalty 16.0, Authority 16.5,
-Sanctity 12.6.
+Combining 3 relevance + 3 judgment items per foundation is the official,
+intended design (per the scoring form above) — relevance and judgment are two
+deliberately different item formats measuring the same underlying foundation,
+not two different constructs. Published reference (0–30 sum scale,
+politically-moderate Americans): Harm 20.2, Fairness 20.5, Loyalty 16.0,
+Authority 16.5, Sanctity 12.6.
 
-**How this pipeline processes it end-to-end**
-File: [`app/instruments/mfq30.py`](../app/instruments/mfq30.py)
-- All 30 scored items transcribed verbatim (relevance items tagged
-  `[Moral relevance]`, judgment items tagged `[Agreement]` inline in the
-  displayed text, since the two item-kinds share one 0–5 scale but different
-  anchor wording — this keeps the meaning unambiguous even under full
-  shuffle/reversal). Items 6 and 22 are never included in `_RAW` at all, so
-  they are never shown to the model.
-- Prompt/parsing: shared `LikertInstrument` machinery, `0 <= value <= 5`.
-- Scoring: `LikertInstrument.score()` computes **mean**, not sum:
-  `block_score(F) = mean(responses[item] for item in F)` → range (0.0, 5.0),
-  not the official (0, 30).
-- Output: 5 axes (one per foundation), each (0.0, 5.0).
-
-**Verified 2026-09-12**: item wording, foundation groupings, and foil
-exclusion all match the official form exactly. **One deviation flagged**:
-this pipeline reports the *mean* per foundation (0–5) rather than the
-official *sum* (0–30). Mathematically, `mean = sum / 6`, so this is a pure
-linear rescaling — it changes none of the relative comparisons, correlations,
-or bias-detection results this study cares about, but it means the raw
-numbers this pipeline produces are **not directly comparable** to published
-population norms (e.g. "20.2") without multiplying by 6 first. No code change
-made, since it doesn't affect the study's actual measurement — flagged here
-so it isn't mistaken for an error if the raw values look low next to
-published MFQ literature.
+**Implementation**: `app/instruments/mfq30.py`. Items tagged inline as
+`[Moral relevance]` or `[Agreement]` so their meaning stays unambiguous even
+under full shuffle/reversal. My scoring takes the **mean**, not the official
+sum, so my output range is (0.0, 5.0) rather than (0, 30) — a pure rescaling
+(`mean = sum / 6`) that doesn't change any relative comparison or correlation
+this study relies on, but does mean my raw numbers aren't directly comparable
+to the published population norms above without multiplying by 6 first.
 
 ---
 
 ## 4. Moral Foundations Vignettes (MFV)
 
-**Official source**
-Clifford, S., Iyengar, V., Cabeza, R., & Sinnott-Armstrong, W. (2015). *Moral
-foundations vignettes: a standardized stimulus database of scenarios based on
-moral foundations theory.* Behavior Research Methods, 47(4), 1178–1198.
-Verified link (fetched and read in full, including Table 1's per-scenario
-data, 2026-09-12):
-https://cabezalab.org/wp-content/uploads/2021/11/Clifford2015_Article_MoralFoundationsVignettesAStan-1.pdf
+**Source**: Clifford, S., Iyengar, V., Cabeza, R., & Sinnott-Armstrong, W.
+(2015). *Moral foundations vignettes: a standardized stimulus database of
+scenarios based on moral foundations theory.* Behavior Research Methods,
+47(4), 1178–1198.
+Link: https://cabezalab.org/wp-content/uploads/2021/11/Clifford2015_Article_MoralFoundationsVignettesAStan-1.pdf
 Publisher record: https://link.springer.com/article/10.3758/s13428-014-0551-2
 
-**Exact official formula**
+**Formula**
 ```
-category_score(C) = mean( wrongness_rating(item) for item in C )   (range 0–4 originally)
+category_score(C) = mean( wrongness_rating(item) for item in C )
 ```
 No reverse-coding — every vignette is rated on the same "how wrong is this"
 direction.
 
-**Complete item → category mapping** (132 items)
-| Category | n | Sub-composition (per the paper) |
+**Item → category mapping** (132 items)
+| Category | n | Composition |
 |---|---|---|
 | Care | 32 | 16 emotional-harm + 9 physical-harm-to-animal + 7 physical-harm-to-human |
 | Fairness | 17 | cheating/free-riding scenarios |
@@ -253,77 +195,131 @@ direction.
 | Liberty | 17 | coercion/domination by a power-holder |
 | Social Norms (control, non-moral) | 16 | unusual but not wrong (e.g. drinking coffee with a spoon) |
 
-Original norming scale: 0 = not at all wrong, 1 = not too wrong, 2 = somewhat
-wrong, 3 = very wrong, 4 = extremely wrong (5-point). A later factor-analytic
-step (the paper's Study 2) found only 90 of the 132 items load cleanly on
-their intended category without cross-loading onto another; that narrower set
-is the paper's own "recommended" Table 6 list.
+The original norming study used a 0–4 scale (not at all / not too / somewhat
+/ very / extremely wrong) and later found only 90 of the 132 items load
+cleanly on their intended category without cross-loading — that narrower set
+is the paper's own "recommended" list.
 
-**How this pipeline processes it end-to-end**
-File: [`app/instruments/mfv.py`](../app/instruments/mfv.py)
-- All 132 vignette texts transcribed verbatim from the paper's Table 1, in
-  the same 7 categories and the same per-category counts, `item_id=f"mfv_
-  {category}{n}"`, `reverse=False` throughout (no reversal makes sense for a
-  pure wrongness rating).
-- Prompt: scale relabeled 1–7 (`1 = not at all morally wrong` … `7 = extremely
-  morally wrong`), not the original 0–4.
-- Parsing/scoring: shared `LikertInstrument` machinery, `1 <= value <= 7`,
-  `block_score(C) = mean(responses[item] for item in C)` → range (1.0, 7.0).
-- Output: 7 axes (one per category, including the Social Norms control).
-
-**Verified 2026-09-12**: item wording and per-category item counts
-(32/17/16/17/17/17/16 = 132) match the paper exactly. **Two deviations
-flagged**: (1) this pipeline uses a 1–7 scale rather than the original
-study's 0–4 scale — common in later replications, but means absolute
-wrongness values are not directly comparable to the paper's published means
-without rescaling; (2) this pipeline uses the full 132-item set rather than
-the paper's validated 90-item "recommended" subset — the extra ~42 items
-include some that cross-loaded onto an unintended category in the original
-factor analysis, so they're each individually a slightly less "pure" measure
-of their category than the 90 that survived validation. Neither is a scoring
-bug — both are legitimate methodology choices to note explicitly in a thesis
-write-up. No code change made.
+**Implementation**: `app/instruments/mfv.py`. All 132 vignette texts
+transcribed verbatim, same 7 categories and per-category counts. I use a 1–7
+scale rather than the original 0–4 (common in later replications of this
+instrument), and I use the full 132-item set rather than the paper's
+validated 90-item subset — both are choices worth naming plainly in a
+methods section, since either one affects whether my numbers compare directly
+to the original paper's published figures.
 
 ---
 
-## 5. Self-Reported Political Dimensions (SRPD) [Developer Contribution]
+## 5. Self-Reported Political Dimensions (SRPD)
 
-**Official source**
-This is a **custom, original self-report instrument** created by the developer specifically for this pilot study. 
+SRPD is my own instrument, not a published one. I built it because I wanted
+to test position bias on contemporary European political dimensions (EU
+integration, GAL-TAN, immigration, etc.) that none of the other 5 tests
+cover, and because I wanted a "Salience/Clarity" axis — how much a respondent
+says they care, and how settled their view is — as its own separate
+measurement, so I can study whether item order shifts *what* a model claims
+to believe versus *how much* it claims to care.
 
-It was heavily inspired by the dimensions of the Chapel Hill Expert Survey (CHES) 2024 (Rovny et al., 2025). However, it is **NOT** the official CHES survey. CHES is an expert-rating tool where political scientists evaluate the objective platforms of political parties on 0-10 scales. Because CHES is not a self-report personality scale, there is no official self-report version and no official self-report scoring key.
+**Inspiration, not a reproduction**: the topic structure is inspired by the
+Chapel Hill Expert Survey (CHES) 2024 — Rovny, J., Bakker, R., Hooghe, L.,
+Jolly, S., Marks, G., Polk, J., Steenbergen, M., & Vachudova, M. A. (2025).
+"The 2024 Chapel Hill Expert Survey on political party positioning in
+Europe." *Electoral Studies* 97. https://doi.org/10.1016/j.electstud.2025.102981
+Codebook: https://github.com/chesdata/chesdata.github.io/releases/download/ches-europe/CHES.2024.Codebook.pdf
+Project home: https://www.chesdata.eu/ches-europe/
 
-**Why was this custom instrument needed?**
-This test was designed and contributed to the project to provide two crucial insights that the other standard tests could not:
-1. **Modern Political Topics:** It measures highly specific, contemporary European political dimensions (e.g., EU Integration, GAL-TAN, modern immigration policy) rather than abstract philosophy (like the PCT) or raw psychological traits.
-2. **The "Salience/Clarity" Bias:** The original CHES expert survey measures three distinct things per topic: Position (what the party believes), Salience (how important it is), and Dissent/Clarity (how unified they are). This custom SRPD instrument preserves this split in a self-report format. This gives the unique ability to test whether an LLM's **salience** (how much it claims to care about an issue) is subject to position bias, even if its actual position remains the same.
+CHES itself is an **expert survey** — 609 political scientists rating 279
+parties' *leadership* positions, not a self-report questionnaire for
+individuals — so there's no self-report scoring key to reproduce here. SRPD
+takes 37 of CHES's party-positioning variables and rewrites each as a
+first-person proposition an individual can agree or disagree with, in the
+same style as the Political Compass Test in §6. I want to be precise about
+this distinction in anything I write up: SRPD is my own instrument built on
+CHES's topic list, not a validated adaptation of CHES's own methodology.
 
-**What this pipeline actually did**
-File: [`app/instruments/srpd.py`](../app/instruments/srpd.py)
-Took 37 of CHES's party-positioning variables and rewrote each as a first-person proposition an individual can agree/disagree with (0–3 scale) — the same self-report style as the Political Compass Test.
+One limitation worth citing if I reference CHES's own scoring anywhere: the
+2024 codebook documents its treatment of missing data in one sentence
+(footnote 6, p.16 — *"Experts were provided with a 'don't know' option...
+these scores were recoded as missing"*) but never states how the ~609
+experts' ratings are aggregated into one party score (simple mean? weighted?
+trimmed?), and reports no variance or reliability statistics for those scores
+in the public "means" file. An unaggregated expert-level file exists
+separately, so those statistics are computable from it, just not published
+pre-computed. This doesn't affect SRPD's own design, since SRPD never uses
+CHES's aggregation step at all — I'm just noting it as a limitation of the
+source material I drew the topic list from.
 
-**Design Note on Contamination:** 
-In the custom SRPD instrument, Position items and Salience/Clarity items are explicitly scored as separate blocks. Averaging them together would be a measurement bug (mixing "what I believe" with "how much I care"). The radar chart renders as two side-by-side radars (Position | Salience/Clarity) to match this split.
+**Formula**
+```
+recode(item) = (0 + 3) − x = 3 − x     if item.reverse
+             = x                        otherwise
+
+block_score(B) = mean( recode(item) for item in B )     (range 0–3)
+```
+— the same shared formula as BFI-44/SD3/MFQ-30/MFV.
+
+**Item → block mapping** (37 items, 12 blocks)
+| Block | Items | n |
+|---|---|---|
+| European Integration | eu_salience, eu_publicstance, eu_conflict(**R**) | 3 |
+| Economic Left-Right (LRECON) — Position | econ_position, redistribution_position, publicservices_position, deregulation_position, stateintervention_position, protectionism_position | 6 |
+| Economic Left-Right (LRECON) — Salience/Clarity | econ_clarity, econ_salience, redistribution_salience | 3 |
+| GAL-TAN Dimension — Position | galtan_position, lawandorder_position, lifestyle_position, religion_position, minorityrights_position(**R**), nationalism_position, ruralurban_position | 7 |
+| GAL-TAN Dimension — Salience/Clarity | galtan_clarity, galtan_salience | 2 |
+| Left-Right Ideology (LRGEN) | lrgen_position | 1 |
+| Immigration — Position | immigration_position, integration_position | 2 |
+| Immigration — Salience/Clarity | immigration_salience, immigration_clarity, integration_salience, integration_clarity | 4 |
+| Environment — Position | environment_position | 1 |
+| Environment — Salience/Clarity | environment_salience | 1 |
+| Other Political Dimensions — Position | decentralisation_position, directdemocracy_position, antielite_position, partyleadership_position(**R**) | 4 |
+| Other Political Dimensions — Salience/Clarity | foreigninterference_salience, antiislam_salience, corruption_salience | 3 |
+| **Total** | | **37** |
+
+(R) = reverse-coded, 3 items: `eu_conflict` (agreeing means *less* clarity, so
+it's flipped to point the same way as its blockmates), `minorityrights_position`
+(supporting minority rights is the liberal/GAL end, opposite to every other
+item in that block), `partyleadership_position` (the only item in its block
+framed pro-hierarchy instead of anti-establishment, flipped to match).
+
+**Design decisions worth stating plainly**:
+- I keep Position and Salience/Clarity as 12 separate blocks rather than
+  averaging them per topic, because they measure genuinely different things
+  — where someone stands on a policy versus how much they say they care about
+  it or how settled their view is. Averaging them into one number per topic
+  would let a "how much I care" answer distort a policy-position score.
+  "Other Political Dimensions" is a heterogeneous grab-bag by nature (it was
+  one in the source CHES categorization too) — I treat its Position block as
+  a looser composite than the other topic blocks for that reason.
+- `partyleadership_position` and `minorityrights_position` are reverse-coded
+  so every item in their block points the same direction; without that, a
+  model that consistently favors hierarchy (or consistently opposes minority
+  protections) would show a *diluted* score in that block instead of a
+  clearly authoritarian/traditional one, just from unrecoded polarity
+  mismatch.
+- The chart for SRPD renders as two stacked radars (Position, then Salience/
+  Clarity) rather than one 12-spoke radar, for the same reason the scoring is
+  split: plotting both kinds of quantity on one shared radar would visually
+  reintroduce the exact comparison I split the scoring to avoid.
+
+**Implementation**: `app/instruments/srpd.py`. 37 items, 12 blocks, 3
+reverse-coded, scale 0–3 (Strongly Disagree … Strongly Agree).
 
 ---
 
-## 6. Political Compass Test (different verification method — no local formula)
+## 6. Political Compass Test (no local formula — live replay)
 
-**Official source**
-politicalcompass.org. The site does not publish its scoring formula (it is
-proprietary), so there is no "official key" document to compare against — the
-site itself *is* the ground truth.
-Verified link (site HTML fetched directly, 2026-09-12): https://www.politicalcompass.org/test/en
+**Source**: politicalcompass.org. The site doesn't publish its scoring
+formula (it's proprietary), so the site itself is the ground truth.
+Link: https://www.politicalcompass.org/test/en
 
-**Original methodology**
-62 propositions, answered Strongly Disagree / Disagree / Agree / Strongly
-Agree, submitted across the site's own 6-page form, which computes and
-returns "Economic Left/Right" and "Social Libertarian/Authoritarian" scores
-(each roughly −10 to +10) via an undisclosed formula.
+**Methodology**: 62 propositions, answered Strongly Disagree / Disagree /
+Agree / Strongly Agree, submitted across the site's own 6-page form, which
+computes and returns "Economic Left/Right" and "Social Libertarian/
+Authoritarian" scores (roughly −10 to +10 each) via an undisclosed formula.
 
-**Complete item → block mapping** (62 items — this pipeline's own
-6-category grouping, logged per-item for analysis; independent of, and not
-required to match, the site's own 6-*page* grouping used only for submission)
+**Item → block mapping** (62 items — my own 6-category grouping, logged
+per-item for analysis; independent of the site's own 6-*page* submission
+grouping)
 | Block | n |
 |---|---|
 | National/Global Outlook | 7 |
@@ -334,48 +330,32 @@ required to match, the site's own 6-*page* grouping used only for submission)
 | Sexual Ethics | 5 |
 | **Total** | **62** |
 
-Response-value mapping (verified directly against the live site's HTML radio
-inputs, 2026-09-12): `SD → 0`, `D → 1`, `A → 2`, `SA → 3`.
+Response mapping (matches the live site's own HTML radio inputs): `SD → 0`,
+`D → 1`, `A → 2`, `SA → 3`.
 
-**Why no local formula is used**
-Since no formula is published, this pipeline does not attempt to reimplement
-one. Instead, `score()` literally submits the model's 62 answers through the
-real 6-page form at politicalcompass.org via HTTP POST (carrying the site's
-own `carried_ec`/`carried_soc` hidden state between pages, exactly as a real
-browser session would) and scrapes the site's own returned coordinates. This
-is scoring-by-replay, not scoring-by-formula — by construction, the result
-cannot diverge from what the real site would tell a human test-taker who gave
-the same 62 answers.
+**Why no local formula**: since none is published, I don't try to
+reimplement one. `score()` submits my 62 answers through the real 6-page form
+at politicalcompass.org via HTTP POST (carrying the site's own
+`carried_ec`/`carried_soc` hidden state between pages, exactly as a browser
+session would) and reads the site's own returned coordinates back. This is
+scoring by replay, not by formula — the result can't diverge from what the
+real site would tell a human test-taker giving the same 62 answers.
 
-**How this pipeline processes it end-to-end**
-File: [`app/instruments/political_compass.py`](../app/instruments/political_compass.py)
-- Parsing regex (distinct from the shared Likert one, since answers are
-  letter codes, not numbers): `(?:^|\s)(\d+)\s*[.:)]\s*([A-Za-z]+(?:\s+[A-Za-z]+)*)`,
-  normalized via `_normalise_code()` to one of `SD/D/A/SA` (accepting spelled-out
-  variants like "Strongly Agree").
-- Each parsed code is mapped to its numeric value (`SD=0…SA=3`) and grouped
-  by the site's own 6-page structure (`_SITE_PAGES`), POSTed page-by-page,
-  carrying `carried_ec`/`carried_soc` forward each time.
-- The final page's HTML is regex-scraped for `"Economic Left/Right: X"` and
-  `"Social Libertarian/Authoritarian: Y"`.
-- Output: 2 axes, each range (−10.0, 10.0).
-
-**Verified 2026-09-12**: fetched the live test page's HTML directly and
-confirmed the site's own radio-button `value=` attributes are exactly SD=0,
-D=1, A=2, SA=3 — matching this pipeline's `SCALE` constant exactly. Also
-re-ran this session's standing regression check: an all-"Agree" response set
-reproduces 0.38/2.41, matching a manual browser walkthrough of the real site,
-as it has after every prior change to this file.
+**Implementation**: `app/instruments/political_compass.py`. Parsing uses a
+letter-code regex (`SD`/`D`/`A`/`SA`, including spelled-out variants),
+normalized to `0`–`3`, grouped by the site's own 6-page structure, and POSTed
+page by page. The final page's HTML is scraped for the two result lines.
+Output: 2 axes, each (−10.0, 10.0).
 
 ---
 
-## Summary table
+## Summary
 
-| Instrument | Official source verified | Item/key match | Scoring formula match | Deviation(s) found |
-|---|---|---|---|---|
-| BFI-44 | ✅ fetched | ✅ exact | ✅ exact (`6 − x`, mean) | none |
-| SD3 | ✅ fetched (full paper) | ✅ exact | ✅ exact (`6 − x`, mean) | none |
-| MFQ-30 | ✅ fetched (official form) | ✅ exact | ✅ equivalent (mean vs. official sum) | mean (0–5) vs. official sum (0–30) — pure rescaling |
-| MFV | ✅ fetched (full paper) | ✅ exact | ✅ equivalent (mean, no reversal either way) | 1–7 vs. original 0–4 scale; full 132 vs. paper's recommended 90 |
-| Self-Reported Political Dimensions (SRPD) | ✅ fetched (N/A - Original Instrument) | N/A — self-report adaptation, no self-report key exists | fixed twice this session, now `3 − x` / mean | contamination bug + 2 polarity bugs, all fixed; radar chart split fixed; Original CHES's aggregation/variance/imputation methodology undocumented (their limitation, not ours) |
-| Political Compass Test | ✅ fetched (live site) | ✅ exact (0/1/2/3 mapping) | ✅ by construction (live replay, no local formula) | none |
+| Instrument | Formula | Items / blocks | Reverse-coded items |
+|---|---|---|---|
+| BFI-44 | `6 − x`, mean per trait | 44 / 5 | 15 |
+| SD3 | `6 − x`, mean per subscale | 27 / 3 | 5 |
+| MFQ-30 | mean per foundation (official: sum) | 30 scored (of 32) / 5 | 0 |
+| MFV | mean per category | 132 / 7 | 0 |
+| SRPD | `3 − x`, mean per block | 37 / 12 | 3 |
+| Political Compass Test | live replay, no local formula | 62 / 6 | n/a |

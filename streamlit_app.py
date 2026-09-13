@@ -41,23 +41,45 @@ CHART_FONT_SIZE = 18
 LEGEND_FONT_SIZE = 20
 TICK_FONT_SIZE = 16
 
+
+@st.cache_resource
+def _saved_results_store() -> dict:
+    # A live-demo fallback: if the API is slow/unresponsive mid-demonstration,
+    # switch to previously-saved trials instead. Deliberately a cache_resource,
+    # not session_state -- session_state survives a "Clear cache" click,
+    # cache_resource does not, so clicking the app menu's "Clear cache" is what
+    # wipes every saved result, exactly like the rest of Streamlit's caches.
+    return {}
+
+
 if "points" not in st.session_state:
     st.session_state.points = []          # accumulated trials for the current graph, across all instruments
 if "shuffle_counter" not in st.session_state:
     st.session_state.shuffle_counter = 0  # so each shuffle click gets a fresh random permutation
 if "is_running" not in st.session_state:
     st.session_state.is_running = False   # guards against a double-click firing two overlapping trials
+if "pending_save" not in st.session_state:
+    st.session_state.pending_save = None  # the latest not-yet-saved trial (dict), or None
+if "view_mode" not in st.session_state:
+    st.session_state.view_mode = "live"   # "live" | "saved"
+if "last_result_summary" not in st.session_state:
+    st.session_state.last_result_summary = None
 
 st.title("LLM Position Bias Pilot")
 
 col_controls, col_graph = st.columns([1, 2], gap="large")
 
 with col_controls:
+    saved_mode = st.session_state.view_mode == "saved"
+
+    # Test type stays live even in saved-results mode -- it's how you browse
+    # which test's saved data to look at. Everything else that could start a
+    # new trial or touch session state is disabled while viewing saved data.
     instrument_name = st.selectbox("Test type", list(INSTRUMENTS.keys()))
     instrument = INSTRUMENTS[instrument_name]
 
     model_choice = st.selectbox(
-        "Model", MODELS, format_func=lambda m: m["label"]
+        "Model", MODELS, format_func=lambda m: m["label"], disabled=saved_mode,
     )
 
     condition_type = st.radio(
@@ -68,6 +90,7 @@ with col_controls:
             "full_shuffle": "Shuffle (fully random)",
             "full_reversal": "Full reversal",
         }[c],
+        disabled=saved_mode,
     )
 
     condition_label = "baseline"
@@ -77,13 +100,40 @@ with col_controls:
         condition_label = "full_reversal"
 
     run_clicked = st.button("Run trial", type="primary", use_container_width=True,
-                             disabled=st.session_state.is_running)
-    reset_clicked = st.button("Reset graph", use_container_width=True)
+                             disabled=st.session_state.is_running or saved_mode)
+    # Reset graph only clears this session's live view (points + shuffle
+    # counter) -- it never touches the saved-results store, and it's disabled
+    # entirely in saved mode since there's nothing live to reset there.
+    reset_clicked = st.button("Reset graph", use_container_width=True, disabled=saved_mode)
+
+    pending = st.session_state.pending_save
+    can_save = (not saved_mode) and pending is not None and pending["instrument_name"] == instrument_name
+    save_clicked = st.button("Save results", use_container_width=True, disabled=not can_save)
+    if can_save:
+        st.caption(f"Ready to save: {pending['model']} ({pending['condition_label']})")
+
+    toggle_label = "Go to real-time section" if saved_mode else "Check saved results"
+    toggle_clicked = st.button(toggle_label, use_container_width=True)
+
+    if toggle_clicked:
+        st.session_state.view_mode = "live" if saved_mode else "saved"
+        st.rerun()
 
     if reset_clicked:
         st.session_state.points = []
         st.session_state.shuffle_counter = 0
+        st.session_state.pending_save = None
+        st.session_state.last_result_summary = None
         st.rerun()
+
+    if save_clicked and can_save:
+        store = _saved_results_store()
+        store.setdefault(instrument_name, []).append(pending)
+        st.session_state.pending_save = None
+        st.rerun()
+
+    if st.session_state.last_result_summary:
+        st.success(st.session_state.last_result_summary)
 
     # The is_running guard (not just the button's disabled= state) is what actually
     # stops a double-click: a trial can take tens of seconds, and a second click
@@ -91,7 +141,7 @@ with col_controls:
     # overlapping call to the same model -- which is exactly what tripped a 429 on a
     # rate-limited free model in testing (two near-simultaneous requests where one
     # alone would have been fine).
-    if run_clicked and not st.session_state.is_running:
+    if run_clicked and not st.session_state.is_running and not saved_mode:
         st.session_state.is_running = True
         rng = random.Random()
         trial = None
@@ -112,7 +162,7 @@ with col_controls:
 
         if trial is not None:
             save_trial(instrument, trial)
-            st.session_state.points.append({
+            point = {
                 "model": model_choice["label"],
                 "model_id": model_choice["id"],
                 "instrument_name": instrument_name,
@@ -122,16 +172,35 @@ with col_controls:
                 "axis_ranges": dict(trial.score.axis_ranges),
                 "elapsed_seconds": round(trial.elapsed_seconds, 1),
                 "timestamp": time.strftime("%H:%M:%S", time.localtime(trial.timestamp)),
-            })
+            }
+            st.session_state.points.append(point)
+            # This is the one and only place pending_save gets set -- a fresh
+            # successful run is what turns "Save results" pressable. Saving it
+            # (or resetting the graph) is what turns it back off; running
+            # again before saving just replaces which trial is queued to save.
+            st.session_state.pending_save = point
             if condition_type == "full_shuffle":
                 st.session_state.shuffle_counter += 1
             summary = ", ".join(f"{k}={v:.2f}" for k, v in trial.score.axes.items())
-            st.success(f"{model_choice['label']} ({trial.condition_label}): {summary}")
+            st.session_state.last_result_summary = f"{model_choice['label']} ({trial.condition_label}): {summary}"
+            # Rerun so "Save results" reflects the just-set pending_save on this
+            # same round-trip -- otherwise its disabled= was already computed
+            # earlier in this same script pass, using the stale (pre-trial)
+            # value, and would only catch up on the *next* unrelated rerun.
+            st.rerun()
 
 with col_graph:
-    points = [p for p in st.session_state.points if p["instrument_name"] == instrument_name]
+    if saved_mode:
+        points = list(_saved_results_store().get(instrument_name, []))
+    else:
+        points = [p for p in st.session_state.points if p["instrument_name"] == instrument_name]
+
     if not points:
-        st.info("No trials yet for this test. Configure a run on the left and click **Run trial**.")
+        if saved_mode:
+            st.info("No saved results yet for this test. Go to the real-time section, run a "
+                    "trial, and click **Save results**.")
+        else:
+            st.info("No trials yet for this test. Configure a run on the left and click **Run trial**.")
     else:
         axis_names = list(points[0]["axes"].keys())
         shape_by_condition = {"baseline": "star", "full_shuffle": "circle", "full_reversal": "diamond"}
@@ -149,22 +218,25 @@ with col_graph:
             if is_compass:
                 x_lo, x_hi = points[0]["axis_ranges"][x_label]
                 y_lo, y_hi = points[0]["axis_ranges"][y_label]
-                # classic politicalcompass.org quadrant colors
+                # Quadrant geometry only (labels + divider lines) -- no fill
+                # color, so this matches the transparent, theme-adaptive
+                # background every other chart in this app uses (bgcolor=
+                # "rgba(0,0,0,0)" below) instead of a hardcoded white plot area.
+                # Label color is a neutral mid-gray, not black/white, so it
+                # reads on both a light and a dark Streamlit theme.
                 quadrants = [
-                    (x_lo, 0, 0, y_hi, "rgba(239,148,148,0.55)", "Authoritarian Left", x_lo, y_hi, "left", "top"),
-                    (0, x_hi, 0, y_hi, "rgba(120,190,225,0.55)", "Authoritarian Right", x_hi, y_hi, "right", "top"),
-                    (x_lo, 0, y_lo, 0, "rgba(150,205,150,0.55)", "Libertarian Left", x_lo, y_lo, "left", "bottom"),
-                    (0, x_hi, y_lo, 0, "rgba(205,170,215,0.55)", "Libertarian Right", x_hi, y_lo, "right", "bottom"),
+                    ("Authoritarian Left", x_lo, y_hi, "left", "top"),
+                    ("Authoritarian Right", x_hi, y_hi, "right", "top"),
+                    ("Libertarian Left", x_lo, y_lo, "left", "bottom"),
+                    ("Libertarian Right", x_hi, y_lo, "right", "bottom"),
                 ]
-                for x0, x1, y0, y1, color, label, lx, ly, xanchor, yanchor in quadrants:
-                    fig.add_shape(type="rect", x0=x0, x1=x1, y0=y0, y1=y1,
-                                  fillcolor=color, line_width=0, layer="below")
+                for label, lx, ly, xanchor, yanchor in quadrants:
                     fig.add_annotation(x=lx, y=ly, text=label, showarrow=False,
                                        xanchor=xanchor, yanchor=yanchor,
-                                       font=dict(color="rgba(0,0,0,0.55)", size=18),
+                                       font=dict(color="rgba(128,128,128,0.9)", size=18),
                                        xshift=8 if xanchor == "left" else -8,
                                        yshift=-6 if yanchor == "top" else 6)
-                fig.update_layout(plot_bgcolor="white")
+                fig.update_layout(plot_bgcolor="rgba(0,0,0,0)")
 
             for p in points:
                 fig.add_trace(go.Scatter(
@@ -178,18 +250,30 @@ with col_graph:
                     textfont=dict(color=color_by_model[p["model"]], size=TICK_FONT_SIZE),
                     marker=dict(size=15, symbol=shape_by_condition.get(p["condition_type"], "circle"),
                                 color=color_by_model[p["model"]],
-                                line=dict(width=1.5, color="rgba(0,0,0,0.6)")),
+                                line=dict(width=1.5, color="rgba(128,128,128,0.8)")),
                     hovertemplate=(f"{p['condition_label']}<br>{x_label}=%{{x:.2f}}<br>"
                                     f"{y_label}=%{{y:.2f}}<extra>{p['model']}</extra>"),
                 ))
-            fig.add_hline(y=0, line_width=1.5, line_color="black")
-            fig.add_vline(x=0, line_width=1.5, line_color="black")
+            # neutral gray, not black -- a black divider line nearly vanishes
+            # against a dark Streamlit theme's background.
+            fig.add_hline(y=0, line_width=1.5, line_color="rgba(128,128,128,0.6)")
+            fig.add_vline(x=0, line_width=1.5, line_color="rgba(128,128,128,0.6)")
             fig.update_layout(
                 xaxis_title=("Economic Left  ←  →  Economic Right" if is_compass else x_label),
                 yaxis_title=("Libertarian  ←  →  Authoritarian" if is_compass else y_label),
                 height=650, legend_title="Model",
                 font=dict(size=CHART_FONT_SIZE),
-                legend=dict(font=dict(size=LEGEND_FONT_SIZE)),
+                # legend below the chart, not to its right -- a right-side legend
+                # steals horizontal space from the plot itself and, combined with
+                # the larger presentation font, was pushing the compass/scatter
+                # over and clipping its own labels.
+                legend=dict(
+                    font=dict(size=LEGEND_FONT_SIZE),
+                    orientation="h",
+                    yanchor="top", y=-0.15,
+                    xanchor="center", x=0.5,
+                ),
+                margin=dict(b=100),
                 xaxis=dict(title_font=dict(size=CHART_FONT_SIZE), tickfont=dict(size=TICK_FONT_SIZE)),
                 yaxis=dict(title_font=dict(size=CHART_FONT_SIZE), tickfont=dict(size=TICK_FONT_SIZE)),
             )
@@ -210,30 +294,25 @@ with col_graph:
             position_axes = [a for a in axis_names if _srpd_group(a) == "position"]
             salience_axes = [a for a in axis_names if _srpd_group(a) == "salience"]
 
+            # Stacked (one above the other), not side-by-side: two polar charts
+            # sharing one row have to split the container's width between them,
+            # and with 6 verbose axis names each ("Economic Left-Right (LRECON)
+            # -- Salience/Clarity"), that leaves too little room at anything but
+            # a wide viewport -- confirmed by testing at the app's normal
+            # (narrower) width, where side-by-side produced overlapping labels.
+            # Stacked, each radar gets the FULL container width to itself.
             fig = make_subplots(
-                rows=1, cols=2,
-                specs=[[{"type": "polar"}, {"type": "polar"}]],
-                subplot_titles=("Position (policy stances)", "Salience / Clarity"),
-                horizontal_spacing=0.25,
+                rows=2, cols=1,
+                specs=[[{"type": "polar"}], [{"type": "polar"}]],
+                subplot_titles=("<b>Position (policy stances)</b>", "<b>Salience / Clarity</b>"),
+                vertical_spacing=0.18,
             )
             rng = points[0]["axis_ranges"][axis_names[0]]
-            for group_axes, col in [(position_axes, 1), (salience_axes, 2)]:
-                categories = []
-                for i, c in enumerate(group_axes):
-                    wrapped = c.replace(" -- ", "<br>")
-                    # Left chart's right-most label (0 degrees): pad bottom to push it UP significantly
-                    if col == 1 and i == 0:
-                        wrapped += "<br>&nbsp;<br>&nbsp;" 
-                    # Left chart's left-most label (180 degrees): wrap text to prevent left edge cutoff
-                    elif col == 1 and i == 3:
-                        wrapped = wrapped.replace(" Ideology (LRGEN)", "<br>Ideology (LRGEN)")
-                    # Right chart's right-most label (0 degrees): wrap text to prevent right edge cutoff
-                    elif col == 2 and i == 0:
-                        wrapped = wrapped.replace(" Integration", "<br>Integration")
-                    # Right chart's left-most label (180 degrees): pad top to push it DOWN significantly
-                    elif col == 2 and i == 3:
-                        wrapped = "&nbsp;<br>&nbsp;<br>" + wrapped
-                    categories.append(wrapped)
+            for group_axes, row in [(position_axes, 1), (salience_axes, 2)]:
+                # generic wrapping (split each label at its own " -- ") rather
+                # than the previous per-index special-casing, which only held up
+                # at the specific viewport width it was tuned against.
+                categories = [c.replace(" -- ", "<br>") for c in group_axes]
                 categories.append(categories[0])
                 for p in points:
                     r = [p["axes"][a] for a in group_axes] + [p["axes"][group_axes[0]]]
@@ -243,31 +322,35 @@ with col_graph:
                             mode="lines+markers",
                             name=f"{p['model']} ({p['condition_label']})",
                             legendgroup=p["model"],
-                            showlegend=(col == 1),
+                            showlegend=(row == 1),
                             line=dict(color=color_by_model[p["model"]], dash=dash_by_condition.get(p["condition_type"], "solid")),
                             opacity=0.85,
                             hovertemplate="%{theta}=%{r:.2f}<extra>" + f"{p['model']} ({p['condition_label']})" + "</extra>",
                         ),
-                        row=1, col=col,
+                        row=row, col=1,
                     )
             fig.update_polars(
                 radialaxis=dict(range=list(rng), tickfont=dict(size=TICK_FONT_SIZE)),
                 angularaxis=dict(tickfont=dict(size=TICK_FONT_SIZE)),
                 bgcolor="rgba(0,0,0,0)",
             )
-            fig.update_annotations(font_size=CHART_FONT_SIZE)  # the two subplot titles
+            # the two subplot titles -- bigger, bold, and pushed further above
+            # the plot (yshift) than the default, so they read as headings
+            # rather than blending into the topmost angular-axis labels right
+            # below them.
+            fig.update_annotations(font_size=CHART_FONT_SIZE + 4, yshift=15)
             fig.update_layout(
-                height=700, legend_title="Model (condition)",
+                height=1300, legend_title="Model (condition)",
                 font=dict(size=CHART_FONT_SIZE),
                 legend=dict(
                     font=dict(size=LEGEND_FONT_SIZE),
                     orientation="h",
                     yanchor="top",
-                    y=-0.2,
+                    y=-0.06,
                     xanchor="center",
                     x=0.5
                 ),
-                margin=dict(l=140, r=140, t=80, b=100),
+                margin=dict(l=160, r=160, t=60, b=100),
             )
         else:
             categories = axis_names + [axis_names[0]]
@@ -292,10 +375,25 @@ with col_graph:
                 height=650,
                 legend_title="Model (condition)",
                 font=dict(size=CHART_FONT_SIZE),
-                legend=dict(font=dict(size=LEGEND_FONT_SIZE)),
+                # bottom, not right -- a right-side legend competes with the polar
+                # chart for width and was pushing the whole circle left, clipping
+                # its own angular-axis labels on that side.
+                legend=dict(
+                    font=dict(size=LEGEND_FONT_SIZE),
+                    orientation="h",
+                    yanchor="top", y=-0.15,
+                    xanchor="center", x=0.5,
+                ),
+                margin=dict(b=100),
             )
 
         st.plotly_chart(fig, use_container_width=True)
+        # The chart's own bottom margin makes room for its legend, but Streamlit
+        # butts the next element right up against the chart's outer box below
+        # that -- so the legend text and the table header end up almost
+        # touching. A explicit spacer here fixes that for all 6 tests at once,
+        # since every branch above ends up rendering through this same point.
+        st.markdown("<div style='height:2.5rem'></div>", unsafe_allow_html=True)
 
         table_rows = []
         for p in points:

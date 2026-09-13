@@ -47,7 +47,7 @@ MODELS = [
     # OpenAI doesn't expose a way to confirm via API key. CAVEAT: this model
     # rejects temperature=0 outright (confirmed), so unlike every other model
     # here it can't be made deterministic -- see openai_client.py.
-    {"id": "gpt-5.6-luna", "label": "GPT-5.6 Luna (OpenAI, direct, free tier -- not deterministic)", "provider": "openai"},
+    {"id": "gpt-5.6-luna", "label": "GPT-5.6 Luna (OpenAI, direct, free tier)", "provider": "openai"},
 ]
 
 OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
