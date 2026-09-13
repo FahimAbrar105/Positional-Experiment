@@ -62,9 +62,9 @@ def query_chat(model_id: str, messages: list[dict], temperature: float = 0.0,
         "temperature": temperature,
         "max_completion_tokens": max_tokens,
         # gpt-5.x models are reasoning-native; keep effort low to save tokens.
-        # "minimal" is NOT a valid value for every gpt-5.x model (confirmed:
-        # gpt-5.6-luna rejects it, wants none/low/medium/high/xhigh) -- "low"
-        # is accepted everywhere tested. Falls back cleanly below regardless.
+        # "minimal" is not a valid value for every gpt-5.x model -- gpt-5.6-luna,
+        # for instance, only accepts none/low/medium/high/xhigh. "low" is
+        # accepted across the family. Falls back cleanly below regardless.
         "reasoning_effort": "low",
     }
     resp = requests.post(_API_URL, headers=_headers(), json=payload, timeout=timeout)

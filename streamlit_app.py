@@ -1,5 +1,7 @@
+import json
 import random
 import time
+from pathlib import Path
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -42,14 +44,30 @@ LEGEND_FONT_SIZE = 20
 TICK_FONT_SIZE = 16
 
 
+# Saved results live in data/saved_results.json rather than data/results/
+# (which is git-ignored, since it holds per-run trial logs) -- this file is
+# meant to be committed, so anyone who clones the repository gets the saved
+# demo trials immediately, with no API calls needed to reproduce them.
+SAVED_RESULTS_PATH = Path("data/saved_results.json")
+
+
 @st.cache_resource
 def _saved_results_store() -> dict:
-    # A live-demo fallback: if the API is slow/unresponsive mid-demonstration,
-    # switch to previously-saved trials instead. Deliberately a cache_resource,
-    # not session_state -- session_state survives a "Clear cache" click,
-    # cache_resource does not, so clicking the app menu's "Clear cache" is what
-    # wipes every saved result, exactly like the rest of Streamlit's caches.
+    # A live-demo fallback: if the API is slow or unresponsive mid-demo, switch
+    # to previously-saved trials instead. Cached in memory for the life of the
+    # process (avoids re-reading the file on every rerun), loaded from disk on
+    # first access so it survives both restarts and a fresh clone of the repo.
+    if SAVED_RESULTS_PATH.exists():
+        try:
+            return json.loads(SAVED_RESULTS_PATH.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return {}
     return {}
+
+
+def _persist_saved_results(store: dict) -> None:
+    SAVED_RESULTS_PATH.parent.mkdir(parents=True, exist_ok=True)
+    SAVED_RESULTS_PATH.write_text(json.dumps(store, indent=2), encoding="utf-8")
 
 
 if "points" not in st.session_state:
@@ -129,6 +147,7 @@ with col_controls:
     if save_clicked and can_save:
         store = _saved_results_store()
         store.setdefault(instrument_name, []).append(pending)
+        _persist_saved_results(store)
         st.session_state.pending_save = None
         st.rerun()
 
@@ -399,3 +418,113 @@ with col_graph:
             row.update({f"{k}": round(v, 2) for k, v in p["axes"].items()})
             table_rows.append(row)
         st.table(pd.DataFrame(table_rows))
+
+        # ---- "Change from baseline", zoomed to the actual shift ----
+        # The chart above uses each instrument's fixed scale (e.g. 1-5, -10 to
+        # 10), so a real shift between conditions can look flat. This one is
+        # scaled to whatever difference was actually observed, per model, so
+        # that shift is legible -- it complements the chart above rather than
+        # replacing it (that one is still what shows absolute position).
+        st.markdown("<div style='height:2.5rem'></div>", unsafe_allow_html=True)
+        st.subheader("Change from Baseline")
+
+        baselines = {p["model"]: p for p in points if p["condition_type"] == "baseline"}
+        non_baseline_in_scope = [p for p in points if p["condition_type"] != "baseline" and p["model"] in baselines]
+        deltas_list = [
+            {
+                "model": p["model"],
+                "condition_label": p["condition_label"],
+                "condition_type": p["condition_type"],
+                "deltas": {a: p["axes"][a] - baselines[p["model"]]["axes"][a] for a in axis_names},
+            }
+            for p in non_baseline_in_scope
+        ]
+
+        if not deltas_list:
+            st.info("Run a baseline trial plus a shuffle/reversal trial for the same "
+                    "model to see the amplified change-from-baseline view.")
+        elif len(axis_names) == 2 and instrument_name == "Political Compass Test":
+            # A 2D position is already spatial -- zooming the same x/y axes in
+            # around the actual cluster of points amplifies the shift without
+            # needing to convert anything to a delta.
+            bx_label, by_label = axis_names
+            all_x = [b["axes"][bx_label] for b in baselines.values()] + [p["axes"][bx_label] for p in non_baseline_in_scope]
+            all_y = [b["axes"][by_label] for b in baselines.values()] + [p["axes"][by_label] for p in non_baseline_in_scope]
+            pad_x = max((max(all_x) - min(all_x)) * 0.3, 0.5)
+            pad_y = max((max(all_y) - min(all_y)) * 0.3, 0.5)
+            x_lo, x_hi = min(all_x) - pad_x, max(all_x) + pad_x
+            y_lo, y_hi = min(all_y) - pad_y, max(all_y) + pad_y
+
+            dfig = go.Figure()
+            for p in [b for b in baselines.values()] + non_baseline_in_scope:
+                dfig.add_trace(go.Scatter(
+                    x=[p["axes"][bx_label]], y=[p["axes"][by_label]],
+                    mode="markers+text",
+                    name=p["model"],
+                    legendgroup=p["model"],
+                    showlegend=p["model"] not in [t.name for t in dfig.data],
+                    text=[p["condition_label"]],
+                    textposition="top center",
+                    textfont=dict(color=color_by_model[p["model"]], size=TICK_FONT_SIZE),
+                    marker=dict(size=16, symbol=shape_by_condition.get(p["condition_type"], "circle"),
+                                color=color_by_model[p["model"]],
+                                line=dict(width=1.5, color="rgba(128,128,128,0.8)")),
+                    hovertemplate=(f"{p['condition_label']}<br>{bx_label}=%{{x:.2f}}<br>"
+                                    f"{by_label}=%{{y:.2f}}<extra>{p['model']}</extra>"),
+                ))
+            if x_lo <= 0 <= x_hi:
+                dfig.add_vline(x=0, line_width=1.5, line_color="rgba(128,128,128,0.6)")
+            if y_lo <= 0 <= y_hi:
+                dfig.add_hline(y=0, line_width=1.5, line_color="rgba(128,128,128,0.6)")
+            dfig.update_layout(
+                xaxis_title=f"{bx_label} (zoomed)",
+                yaxis_title=f"{by_label} (zoomed)",
+                height=550,
+                font=dict(size=CHART_FONT_SIZE),
+                legend=dict(font=dict(size=LEGEND_FONT_SIZE), orientation="h",
+                            yanchor="top", y=-0.22, xanchor="center", x=0.5),
+                margin=dict(b=100),
+                xaxis=dict(range=[x_lo, x_hi], title_font=dict(size=CHART_FONT_SIZE), tickfont=dict(size=TICK_FONT_SIZE)),
+                yaxis=dict(range=[y_lo, y_hi], title_font=dict(size=CHART_FONT_SIZE), tickfont=dict(size=TICK_FONT_SIZE)),
+            )
+            st.plotly_chart(dfig, use_container_width=True)
+        else:
+            # A radar can't show a negative delta cleanly -- a negative radius
+            # plots on the opposite angle, which would misread as a different
+            # axis moving rather than this one moving down. A diverging
+            # horizontal bar per axis has no such ambiguity, and its own axis
+            # auto-scales to whatever shift was actually observed. Works
+            # uniformly for 3 axes (SD3) through 12 (SRPD) with no special-casing.
+            all_deltas = [v for d in deltas_list for v in d["deltas"].values()]
+            max_abs = max(abs(v) for v in all_deltas) or 1.0
+            pad = max_abs * 0.2
+            dfig = go.Figure()
+            for d in deltas_list:
+                dfig.add_trace(go.Bar(
+                    y=axis_names,
+                    x=[d["deltas"][a] for a in axis_names],
+                    orientation="h",
+                    name=f"{d['model']} ({d['condition_label']})",
+                    # Plotly only auto-shows a legend with 2+ traces; a single
+                    # saved condition (just one model, one non-baseline run)
+                    # would otherwise render with no legend at all.
+                    showlegend=True,
+                    marker=dict(color=color_by_model[d["model"]]),
+                    hovertemplate="%{y}: %{x:+.2f}<extra>" + f"{d['model']} ({d['condition_label']})" + "</extra>",
+                ))
+            dfig.add_vline(x=0, line_width=1.5, line_color="rgba(128,128,128,0.6)")
+            dfig.update_layout(
+                barmode="group",
+                height=max(450, 55 * len(axis_names)),
+                font=dict(size=CHART_FONT_SIZE),
+                xaxis=dict(title="Change from baseline", range=[-max_abs - pad, max_abs + pad],
+                           title_font=dict(size=CHART_FONT_SIZE), tickfont=dict(size=TICK_FONT_SIZE)),
+                yaxis=dict(tickfont=dict(size=TICK_FONT_SIZE), automargin=True),
+                # Default (right-side, vertical) legend here -- unlike the
+                # circular/square radar and compass charts, a wide rectangular
+                # bar chart doesn't lose meaningful plot area to a right-side
+                # legend, so there's no need to force it below the axis.
+                legend=dict(font=dict(size=LEGEND_FONT_SIZE)),
+                margin=dict(l=10, r=10, t=20, b=60),
+            )
+            st.plotly_chart(dfig, use_container_width=True)

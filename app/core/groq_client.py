@@ -3,7 +3,7 @@
 Groq's API is OpenAI-compatible but NOT identical to OpenRouter's: it uses
 `max_completion_tokens` (not `max_tokens`) and a flat `reasoning_effort`
 string (not OpenRouter's nested `{"reasoning": {"effort": ...}}`). Valid
-reasoning_effort values differ per model (verified against Groq's docs):
+reasoning_effort values differ per model, per Groq's documentation:
   openai/gpt-oss-120b / -20b : low | medium | high   (cannot disable)
   qwen/qwen3.6-27b           : none | default
   qwen/qwen3.8-27b           : none | default | low | medium | high
